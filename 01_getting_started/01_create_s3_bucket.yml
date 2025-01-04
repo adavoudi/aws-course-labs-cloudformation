@@ -1,0 +1,8 @@
+Resources:
+  MyBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: mybucket-alireza-2025-01-04
+      VersioningConfiguration:
+           Status: Enabled
+

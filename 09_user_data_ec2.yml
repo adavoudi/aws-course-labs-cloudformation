@@ -1,0 +1,73 @@
+Parameters:
+  EC2ImageId:
+    Type: AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>
+    Default: /aws/service/ami-amazon-linux-latest/amzn2-ami-hvm-x86_64-gp2
+
+Resources:
+  MyInstance:
+    Type: AWS::EC2::Instance
+    Properties:
+      InstanceType: t2.micro
+      ImageId: !Ref EC2ImageId
+      SecurityGroups:
+        - !Ref SecurityGroup
+      UserData:
+        Fn::Base64: |
+          #!/bin/bash
+          # This script installs a web server and creates a simple webpage displaying
+          # the instance ID and availability zone of the instance.
+
+          # Update the package repository and install Apache HTTP Server
+          yum update -y
+          yum install -y httpd
+
+          # Start the Apache service and enable it to run on boot
+          systemctl start httpd
+          systemctl enable httpd
+
+          # Fetch the IMDSv2 token
+          TOKEN=$(curl -X PUT "http://169.254.169.254/latest/api/token" -H "X-aws-ec2-metadata-token-ttl-seconds: 21600")
+
+          # Fetch instance metadata (Instance ID and Availability Zone) using the token
+          INSTANCE_ID=$(curl -s -H "X-aws-ec2-metadata-token: $TOKEN" http://169.254.169.254/latest/meta-data/instance-id)
+          AVAILABILITY_ZONE=$(curl -s -H "X-aws-ec2-metadata-token: $TOKEN" http://169.254.169.254/latest/meta-data/placement/availability-zone)
+
+          # Create a simple HTML file to display the metadata
+          cat <<EOF | tee /var/www/html/index.html
+          <html>
+              <head>
+                  <title>Instance Metadata</title>
+              </head>
+              <body>
+                  <h1>Welcome to the Web Server!</h1>
+                  <p><b>Instance ID:</b> $INSTANCE_ID</p>
+                  <p><b>Availability Zone:</b> $AVAILABILITY_ZONE</p>
+              </body>
+          </html>
+          EOF
+
+          # Open HTTP (port 80) in the firewall
+          firewall-cmd --add-service=http --permanent
+          firewall-cmd --reload
+
+          # Restart Apache to apply changes
+          systemctl restart httpd
+
+          echo "Web server setup complete. Visit the instance's public IP to see the webpage."
+
+
+  SecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Enable HTTP access via port 80 from anywhere
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: '80'
+          ToPort: '80'
+          CidrIp: 0.0.0.0/0
+
+
+Outputs:
+  WebsiteURL:
+    Description: The URL of the newly created web server
+    Value: !Sub "http://${MyInstance.PublicIp}"

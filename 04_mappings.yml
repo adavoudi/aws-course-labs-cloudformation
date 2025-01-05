@@ -1,0 +1,26 @@
+Mappings:
+  Environment:
+    Prod:
+      instanceType: t2.small
+    Dev:
+      instanceType: t2.micro
+
+Parameters:
+  EC2ImageId:
+    Type: AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>
+    Default: /aws/service/ami-amazon-linux-latest/amzn2-ami-hvm-x86_64-gp2
+
+  Env:
+    Type: String
+    Default: Dev
+    AllowedValues:
+        - Prod
+        - Dev
+
+
+Resources:
+  MyInstance:
+    Type: AWS::EC2::Instance
+    Properties:
+      InstanceType: !FindInMap [Environment, !Ref 'Env', instanceType]
+      ImageId: !Ref EC2ImageId

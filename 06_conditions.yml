@@ -1,0 +1,32 @@
+Parameters:
+  EC2ImageId:
+    Type: AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>
+    Default: /aws/service/ami-amazon-linux-latest/amzn2-ami-hvm-x86_64-gp2
+  InputNumber:
+    Type: Number
+    Default: 0
+    MinValue: 0
+    MaxValue: 10
+    ConstraintDescription: Must be between 0 and 10
+
+Conditions:
+  InputNumberIsEight: !Equals [!Ref InputNumber, 8]
+
+Resources:
+  MyInstance:
+    Type: AWS::EC2::Instance
+    Properties:
+      InstanceType: t2.micro
+      ImageId: !Ref EC2ImageId
+    DependsOn:
+         - S3Bucket
+    Condition: InputNumberIsEight
+  
+  S3Bucket:
+    Type: AWS::S3::Bucket
+
+
+Outputs:
+  S3Name:
+    Value: !GetAtt S3Bucket.WebsiteURL
+    

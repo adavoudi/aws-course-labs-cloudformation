@@ -1,0 +1,27 @@
+
+Parameters:
+  TableName:
+    Type: String
+    Default: "MyTable"
+    Description: "The name of the DynamoDB table to create"
+  RCU:
+    Type: Number
+    Default: 2
+    Description: "The read capacity units for the DynamoDB table"
+
+Resources:
+  MyTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Ref TableName
+      AttributeDefinitions:
+        - AttributeName: "Id"
+          AttributeType: "S"
+      KeySchema:
+        - AttributeName: "Id"
+          KeyType: "HASH"
+      ProvisionedThroughput:
+        ReadCapacityUnits: !Ref RCU
+        WriteCapacityUnits: 1
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Delete

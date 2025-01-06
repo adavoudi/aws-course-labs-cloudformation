@@ -1,0 +1,110 @@
+
+
+Resources:
+
+  ArtifactBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      VersioningConfiguration:
+        Status: Enabled
+
+
+  MyCodePipeline:
+    Type: AWS::CodePipeline::Pipeline
+    Properties:
+      ArtifactStore:
+        Location: !Ref ArtifactBucket
+        Type: S3
+      ExecutionMode: SUPERSEDED
+      Name: !Sub "${AWS::StackName}-pipeline"
+      RoleArn: !GetAtt MyCodePipelineArn.Arn
+      Stages:
+        - Name: S3Source
+          Actions:
+            - Name: TemplateSource
+              RunOrder: 1
+              ActionTypeId:
+                Provider: S3
+                Owner: AWS
+                Version: '1'
+                Category: Source
+              Region: us-east-1
+              Configuration:
+                S3Bucket: alireza-codepiepline-sources
+                S3ObjectKey: my-application.zip
+                PollForSourceChanges: 'true'
+              InputArtifacts: []
+              OutputArtifacts:
+                - Name: TemplateSource
+        - Name: Deploy
+          Actions:
+            - Name: Deploy
+              RunOrder: 1
+              ActionTypeId:
+                Category: Deploy
+                Owner: AWS
+                Version: '1'
+                Provider: CloudFormation
+              Region: us-east-1
+              Configuration:
+                ActionMode: CREATE_UPDATE
+                Capabilities: CAPABILITY_NAMED_IAM
+                RoleArn: !GetAtt MyCloudFormationArn.Arn
+                StackName: !Sub "${AWS::StackName}-stack"
+                TemplatePath: TemplateSource::template.yml
+              InputArtifacts:
+                - Name: TemplateSource
+              OutputArtifacts: []
+
+  MyCloudFormationArn:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: cloudformation.amazonaws.com
+            Action: sts:AssumeRole
+      Path: /
+      Policies:
+        - PolicyName: MyCloudFormationPolicy
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - ec2:*
+                  - ssm:*
+                Resource: '*'
+
+  MyCodePipelineArn:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: codepipeline.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: MyCodePipelinePolicy
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - cloudformation:CreateStack
+                  - cloudformation:DeleteStack
+                  - cloudformation:UpdateStack
+                  - cloudformation:DescribeStacks
+                  - cloudformation:DescribeStackEvents
+                  - cloudformation:DescribeStackResource
+                  - cloudformation:DescribeStackResources
+                  - cloudformation:GetTemplate
+                  - cloudformation:ValidateTemplate
+                  - iam:PassRole
+                  - sns:Publish
+                  - s3:*
+                Resource: "*"

@@ -1,0 +1,135 @@
+Parameters:
+  EC2ImageId:
+    Type: AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>
+    Default: /aws/service/ami-amazon-linux-latest/amzn2-ami-hvm-x86_64-gp2
+
+Resources:
+  FirstVPC:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: '10.100.0.0/16'
+      EnableDnsHostnames: true
+      EnableDnsSupport: true
+
+  SecondVPC:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: '10.200.0.0/16'
+      EnableDnsHostnames: true
+      EnableDnsSupport: true
+  
+  FirstVPCPublicSubnet:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref FirstVPC
+      CidrBlock: '10.100.1.0/24'
+      AvailabilityZone: !Select [ 0, !GetAZs '' ]
+      MapPublicIpOnLaunch: true
+
+  SecondVPCPrivateSubnet:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref SecondVPC
+      CidrBlock: '10.200.12.0/24'
+      AvailabilityZone: !Select [ 1, !GetAZs '' ]
+  
+  FirstVPCInternetGateway:
+    Type: AWS::EC2::InternetGateway
+  
+  FirstVPCGatewayAttachment:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties:
+      VpcId: !Ref FirstVPC
+      InternetGatewayId: !Ref FirstVPCInternetGateway
+  
+  FirstVPCRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref FirstVPC
+
+  SecondVPCRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref SecondVPC
+    
+  FirstVPCRoute:
+    Type: AWS::EC2::Route
+    DependsOn: FirstVPCGatewayAttachment
+    Properties:
+      RouteTableId: !Ref FirstVPCRouteTable
+      DestinationCidrBlock: '0.0.0.0/0'
+      GatewayId: !Ref FirstVPCInternetGateway
+  
+  FirstVPCPublicSubnetRouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref FirstVPCPublicSubnet
+      RouteTableId: !Ref FirstVPCRouteTable
+
+  SecondVPCPrivateSubnetRouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref SecondVPCPrivateSubnet
+      RouteTableId: !Ref SecondVPCRouteTable
+
+  PeerConnection:
+    Type: AWS::EC2::VPCPeeringConnection
+    Properties:
+      PeerVpcId: !Ref SecondVPC
+      VpcId: !Ref FirstVPC
+
+  FirstVPCRouteToPeer:
+    Type: AWS::EC2::Route
+    Properties:
+      RouteTableId: !Ref FirstVPCRouteTable
+      DestinationCidrBlock: !GetAtt SecondVPC.CidrBlock
+      VpcPeeringConnectionId: !Ref PeerConnection
+
+  SecondVPCRouteToPeer:
+    Type: AWS::EC2::Route
+    Properties:
+      RouteTableId: !Ref SecondVPCRouteTable
+      DestinationCidrBlock: !GetAtt FirstVPC.CidrBlock
+      VpcPeeringConnectionId: !Ref PeerConnection
+  
+  SSHSecurityGroupFirstVPC:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Enable SSH access via port 22
+      VpcId: !Ref FirstVPC
+      SecurityGroupIngress:
+        - CidrIp: '0.0.0.0/0'
+          FromPort: 22
+          ToPort: 22
+          IpProtocol: tcp
+  
+  SSHSecurityGroupSecondVPC:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Enable SSH access via port 22
+      VpcId: !Ref SecondVPC
+      SecurityGroupIngress:
+        - SourceSecurityGroupId: !GetAtt SSHSecurityGroupFirstVPC.GroupId
+          FromPort: 22
+          ToPort: 22
+          IpProtocol: tcp
+  
+  FirstVPCInstance:
+    Type: AWS::EC2::Instance
+    Properties:
+      ImageId: !Ref EC2ImageId
+      InstanceType: t2.micro
+      KeyName: MyMainKey
+      SubnetId: !Ref FirstVPCPublicSubnet
+      SecurityGroupIds:
+           - !Ref SSHSecurityGroupFirstVPC
+
+  SecondVPCInstance:
+    Type: AWS::EC2::Instance
+    Properties:
+      ImageId: !Ref EC2ImageId
+      InstanceType: t2.micro
+      KeyName: MyMainKey
+      SubnetId: !Ref SecondVPCPrivateSubnet
+      SecurityGroupIds:
+           - !Ref SSHSecurityGroupSecondVPC

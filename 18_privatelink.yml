@@ -1,0 +1,342 @@
+Parameters:
+  EC2ImageId:
+    Type: AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>
+    Default: /aws/service/ami-amazon-linux-latest/amzn2-ami-hvm-x86_64-gp2
+
+Resources:
+  VPCA:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: '10.100.0.0/16'
+      EnableDnsHostnames: true
+      EnableDnsSupport: true
+
+  VPCAPublicSubnet:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPCA
+      CidrBlock: '10.100.1.0/24'
+      AvailabilityZone: !Select [ 1, !GetAZs '' ]
+      MapPublicIpOnLaunch: true
+  
+  InternetGateway:
+    Type: AWS::EC2::InternetGateway
+  
+  GatewayAttachment:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties:
+      VpcId: !Ref VPCA
+      InternetGatewayId: !Ref InternetGateway
+  
+  PublicRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref VPCA
+  
+  PublicRoute:
+    Type: AWS::EC2::Route
+    Properties:
+      RouteTableId: !Ref PublicRouteTable
+      DestinationCidrBlock: '0.0.0.0/0'
+      GatewayId: !Ref InternetGateway
+  
+  AssociatePublicRouteTableToPublicSubnet:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref VPCAPublicSubnet
+      RouteTableId: !Ref PublicRouteTable
+  
+  VPCB:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: '10.200.0.0/16'
+      EnableDnsHostnames: true
+      EnableDnsSupport: true
+  
+  VPCBPrivateSubnet2:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPCB
+      CidrBlock: '10.200.2.0/24'
+      AvailabilityZone: !Select [ 1, !GetAZs '' ]
+
+  SSHSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Enable SSH access via port 22
+      VpcId: !Ref VPCA
+      SecurityGroupIngress:
+        - CidrIp: '0.0.0.0/0'
+          FromPort: 22
+          ToPort: 22
+          IpProtocol: tcp
+  
+  ALBSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Enable HTTP access via port 80
+      VpcId: !Ref VPCB
+      SecurityGroupIngress:
+        - CidrIp: '0.0.0.0/0'
+          FromPort: 80
+          ToPort: 80
+          IpProtocol: tcp
+
+  PrivateInstanceSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Enable HTTP access via port 80 and allow ssh access via port 22
+      VpcId: !Ref VPCB
+      SecurityGroupIngress:
+        - CidrIp: '0.0.0.0/0'
+          FromPort: 80
+          ToPort: 80
+          IpProtocol: tcp
+        - CidrIp: '0.0.0.0/0'
+          FromPort: 22
+          ToPort: 22
+          IpProtocol: tcp
+  
+  PublicInstance:
+    Type: AWS::EC2::Instance
+    Properties:
+      InstanceType: t2.micro
+      ImageId: !Ref EC2ImageId
+      SubnetId: !Ref VPCAPublicSubnet
+      SecurityGroupIds:
+        - !Ref SSHSecurityGroup
+      KeyName: MyMainKey
+      Tags:
+        - Key: Name
+          Value: PublicInstance
+
+  PrivateInstance:
+    Type: AWS::EC2::Instance
+    DependsOn:
+         - AssociateVPCBPrivateRouteTableToVPCBPrivateSubnet2
+         - AssociateVPCBRouteTableToVPCBPublicSubnet
+         - NATGateway
+         - GatewayAttachmentVPCB
+    Properties:
+      InstanceType: t2.micro
+      ImageId: !Ref EC2ImageId
+      SubnetId: !Ref VPCBPrivateSubnet2
+      SecurityGroupIds:
+        - !Ref PrivateInstanceSecurityGroup
+      KeyName: MyMainKey
+      UserData: 
+        Fn::Base64: |
+          #!/bin/bash
+          # This script installs a web server and creates a simple webpage displaying
+          # the instance ID and availability zone of the instance.
+
+          # Wait for internet connectivity
+          while ! curl -s http://www.google.com > /dev/null; do
+            echo "Waiting for internet connection..."
+            sleep 5
+          done
+          echo "Internet connected. Proceeding with setup."
+
+          # Update the package repository and install Apache HTTP Server
+          yum update -y
+          yum install -y httpd
+
+          # Start the Apache service and enable it to run on boot
+          systemctl start httpd
+          systemctl enable httpd
+
+          # Fetch the IMDSv2 token
+          TOKEN=$(curl -X PUT "http://169.254.169.254/latest/api/token" -H "X-aws-ec2-metadata-token-ttl-seconds: 21600")
+
+          # Fetch instance metadata (Instance ID and Availability Zone) using the token
+          INSTANCE_ID=$(curl -s -H "X-aws-ec2-metadata-token: $TOKEN" http://169.254.169.254/latest/meta-data/instance-id)
+          AVAILABILITY_ZONE=$(curl -s -H "X-aws-ec2-metadata-token: $TOKEN" http://169.254.169.254/latest/meta-data/placement/availability-zone)
+
+          # Create a simple HTML file to display the metadata
+          cat <<EOF | tee /var/www/html/index.html
+          <html>
+              <head>
+                  <title>Instance Metadata</title>
+              </head>
+              <body>
+                  <h1>Welcome to the Web Server!</h1>
+                  <p><b>Instance ID:</b> $INSTANCE_ID</p>
+                  <p><b>Availability Zone:</b> $AVAILABILITY_ZONE</p>
+              </body>
+          </html>
+          EOF
+
+          # Restart Apache to apply changes
+          systemctl restart httpd
+
+          echo "Web server setup complete. Visit the instance's public IP to see the webpage."
+      Tags:
+        - Key: Name
+          Value: PrivateInstance
+
+  PrivateLoadBalancer:
+    Type: AWS::ElasticLoadBalancingV2::LoadBalancer
+    Properties:
+      Name: PrivateALB
+      Subnets:
+        - !Ref VPCBPrivateSubnet2
+      SecurityGroups:
+        - !Ref ALBSecurityGroup
+      Scheme: internal
+      Type: network
+      Tags:
+        - Key: Name
+          Value: PrivateALB
+  
+  PrivateLBTargetGroup:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties:
+      Name: PrivateLBTargetGroup
+      Port: 80
+      Protocol: TCP
+      TargetType: instance
+      VpcId: !Ref VPCB
+      HealthCheckEnabled: true
+      Targets:
+        - Id: !Ref PrivateInstance
+      Tags:
+        - Key: Name
+          Value: PrivateLBTargetGroup
+
+  PrivateListener:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    Properties:
+      DefaultActions:
+        - Type: forward
+          TargetGroupArn: !Ref PrivateLBTargetGroup
+      LoadBalancerArn: !Ref PrivateLoadBalancer
+      Port: 80
+      Protocol: TCP
+
+  EndpointService:
+    Type: AWS::EC2::VPCEndpointService
+    Properties:
+      NetworkLoadBalancerArns:
+        - !Ref PrivateLoadBalancer
+      AcceptanceRequired: false
+
+  EndpointServicePolicy:
+    Type: AWS::EC2::VPCEndpointServicePermissions
+    Properties:
+      AllowedPrincipals:
+        - '*'
+      ServiceId: !Ref EndpointService
+
+  VPCBEndpointSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Enable HTTP access via port 80
+      VpcId: !Ref VPCA
+      SecurityGroupIngress:
+        - CidrIp: '0.0.0.0/0'
+          FromPort: 80
+          ToPort: 80
+          IpProtocol: tcp
+
+  VPCEndpoint:
+    Type: 'AWS::EC2::VPCEndpoint'
+    Properties:
+      VpcEndpointType: 'Interface'
+      ServiceName: !Sub 'com.amazonaws.vpce.${AWS::Region}.${EndpointService.ServiceId}'
+      VpcId: !Ref VPCA
+      SecurityGroupIds:
+        - !Ref VPCBEndpointSecurityGroup
+      SubnetIds: 
+        - !Ref VPCAPublicSubnet
+
+  InternetGateway2:
+    Type: AWS::EC2::InternetGateway
+
+  # Create a public subnet in VPCB
+  VPCBPublicSubnet:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPCB
+      CidrBlock: '10.200.123.0/24'
+      AvailabilityZone: !Select [ 0, !GetAZs '' ]
+      MapPublicIpOnLaunch: true
+
+  GatewayAttachmentVPCB:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties:
+      VpcId: !Ref VPCB
+      InternetGatewayId: !Ref InternetGateway2
+
+  VPCBRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref VPCB
+  
+  VPCBRoute:
+    Type: AWS::EC2::Route
+    Properties:
+      RouteTableId: !Ref VPCBRouteTable
+      DestinationCidrBlock: '0.0.0.0/0'
+      GatewayId: !Ref InternetGateway2
+    DependsOn: GatewayAttachmentVPCB
+
+  AssociateVPCBRouteTableToVPCBPublicSubnet:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref VPCBPublicSubnet
+      RouteTableId: !Ref VPCBRouteTable
+  
+  # Create an Elastic IP for the NAT Gateway
+  NATGatewayEIP:
+    Type: AWS::EC2::EIP
+
+  # Create a NAT Gateway in the public subnet
+  NATGateway:
+    Type: AWS::EC2::NatGateway
+    Properties:
+      AllocationId: !GetAtt NATGatewayEIP.AllocationId
+      SubnetId: !Ref VPCBPublicSubnet
+
+  # Create a route table that sends traffic to the NAT Gateway in VPCBPrivateSubnet2
+  VPCBPrivateRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref VPCB
+  
+  VPCBPrivateRoute:
+    Type: AWS::EC2::Route
+    Properties:
+      RouteTableId: !Ref VPCBPrivateRouteTable
+      DestinationCidrBlock: '0.0.0.0/0'
+      NatGatewayId: !Ref NATGateway
+  
+  AssociateVPCBPrivateRouteTableToVPCBPrivateSubnet2:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref VPCBPrivateSubnet2
+      RouteTableId: !Ref VPCBPrivateRouteTable
+
+  PublicVPCBSSHSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Enable SSH access via port 22
+      VpcId: !Ref VPCB
+      SecurityGroupIngress:
+        - CidrIp: '0.0.0.0/0'
+          FromPort: 22
+          ToPort: 22
+          IpProtocol: tcp
+
+  PublicVpcBInstance:
+    Type: AWS::EC2::Instance
+    Properties:
+      InstanceType: t2.micro
+      ImageId: !Ref EC2ImageId
+      SubnetId: !Ref VPCBPublicSubnet
+      SecurityGroupIds:
+        - !Ref PublicVPCBSSHSecurityGroup
+      KeyName: MyMainKey
+      Tags:
+        - Key: Name
+          Value: PublicVpcBInstance
+

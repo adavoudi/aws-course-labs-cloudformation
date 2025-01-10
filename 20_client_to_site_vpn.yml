@@ -1,0 +1,99 @@
+Parameters:
+  EC2ImageId:
+    Type: AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>
+    Default: /aws/service/ami-amazon-linux-latest/amzn2-ami-hvm-x86_64-gp2
+  ClientRootCertificateChainArn:
+    Type: String
+    Default: arn:aws:acm:us-east-1:515966494838:certificate/b640c4e7-965b-499c-8d8e-6d328ab718bf
+  ServerCertificateArn:
+    Type: String
+    Default: arn:aws:acm:us-east-1:515966494838:certificate/5109651c-5664-4640-96d6-5db39e0a756b
+
+Resources:
+  VPC:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: '192.168.0.0/16'
+      EnableDnsSupport: true
+      EnableDnsHostnames: true
+      Tags:
+        - Key: Name
+          Value: !Sub ${AWS::StackName}-VPC
+  
+  Subnet01:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      CidrBlock: '192.168.100.0/24'
+      AvailabilityZone: !Select [ 0, !GetAZs '' ]
+      Tags:
+        - Key: Name
+          Value: !Sub ${AWS::StackName}-Subnet01
+  
+  Subnet02:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      CidrBlock: '192.168.200.0/24'
+      AvailabilityZone: !Select [ 1, !GetAZs '' ]
+      Tags:
+        - Key: Name
+          Value: !Sub ${AWS::StackName}-Subnet02
+
+  SecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Allow ping from anywhere and 443 from anywhere
+      VpcId: !Ref VPC
+      SecurityGroupIngress:
+        - CidrIp: '0.0.0.0/0'
+          IpProtocol: icmp
+          FromPort: -1
+          ToPort: -1
+        - CidrIp: '0.0.0.0/0'
+          IpProtocol: tcp
+          FromPort: 443
+          ToPort: 443
+  
+  PrivateInstance:
+    Type: AWS::EC2::Instance
+    Properties:
+      ImageId: !Ref EC2ImageId
+      InstanceType: t2.micro
+      SubnetId: !Ref Subnet02
+      SecurityGroupIds:
+        - !Ref SecurityGroup
+      Tags:
+        - Key: Name
+          Value: !Sub ${AWS::StackName}-PrivateInstance
+
+  ClientVpnEndpoint:
+    Type: AWS::EC2::ClientVpnEndpoint
+    Properties:
+      AuthenticationOptions:
+        - Type: certificate-authentication
+          MutualAuthentication:
+            ClientRootCertificateChainArn: !Ref ClientRootCertificateChainArn
+      ClientCidrBlock: "10.10.0.0/16"
+      ConnectionLogOptions: 
+        Enabled: false
+      Description: "My Client VPN Endpoint"
+      SecurityGroupIds:
+           - !Ref SecurityGroup
+      ServerCertificateArn: !Ref ServerCertificateArn
+      SplitTunnel: true
+      VpcId: !Ref VPC
+      TransportProtocol: "tcp"
+  
+  ClientVpnAuthorizationRule:
+    Type: AWS::EC2::ClientVpnAuthorizationRule
+    Properties:
+      ClientVpnEndpointId: !Ref ClientVpnEndpoint
+      TargetNetworkCidr: "0.0.0.0/0" # Allow access to all networks
+      AuthorizeAllGroups: true # Allow access for any client
+
+  TargetNetworkAssociation:
+    Type: AWS::EC2::ClientVpnTargetNetworkAssociation
+    Properties:
+      ClientVpnEndpointId: !Ref ClientVpnEndpoint
+      SubnetId: !Ref Subnet01

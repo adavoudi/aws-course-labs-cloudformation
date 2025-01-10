@@ -1,0 +1,109 @@
+Parameters:
+  EC2ImageId:
+    Type: AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>
+    Default: /aws/service/ami-amazon-linux-latest/amzn2-ami-hvm-x86_64-gp2
+  EC2KeyPair:
+    Type: AWS::EC2::KeyPair::KeyName
+    Default: MyMainKey
+  
+
+Resources:
+  VPCCustomer:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: '10.10.0.0/16'
+      EnableDnsSupport: true
+      EnableDnsHostnames: true
+      Tags:
+        - Key: Name
+          Value: CustomerVPC
+  
+  VPCCustomerPublicSubnet:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPCCustomer
+      CidrBlock: '10.10.1.0/24'
+      AvailabilityZone: !Select 
+        - 0
+        - !GetAZs ''
+      MapPublicIpOnLaunch: true
+      Tags:
+        - Key: Name
+          Value: CustomerPublicSubnet
+  
+  CustomerInternetGateway:
+    Type: AWS::EC2::InternetGateway
+    Properties:
+      Tags:
+        - Key: Name
+          Value: CustomerInternetGateway
+  
+  CustomerGatewayAttachment:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties:
+      VpcId: !Ref VPCCustomer
+      InternetGatewayId: !Ref CustomerInternetGateway
+  
+  CustomerPublicRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref VPCCustomer
+      Tags:
+        - Key: Name
+          Value: CustomerPublicRouteTable
+  
+  CustomerPublicRoute:
+    Type: AWS::EC2::Route
+    Properties:
+      RouteTableId: !Ref CustomerPublicRouteTable
+      DestinationCidrBlock: '0.0.0.0/0'
+      GatewayId: !Ref CustomerInternetGateway
+
+  AssociateCustomerPublicRouteTableToPublicSubnet:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref VPCCustomerPublicSubnet
+      RouteTableId: !Ref CustomerPublicRouteTable
+  
+  SSHSecurityGroupCustomer:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Enable SSH access via port 22 and Ping (ICMP)
+      VpcId: !Ref VPCCustomer
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: '22'
+          ToPort: '22'
+          CidrIp: '0.0.0.0/0'
+        - IpProtocol: icmp
+          FromPort: '-1'
+          ToPort: '-1'
+          CidrIp: '0.0.0.0/0'
+      Tags:
+        - Value: SSHSecurityGroupCustomer
+          Key: Name
+  
+  CustomerEC2Instance:
+    Type: AWS::EC2::Instance
+    Properties:
+      InstanceType: t2.micro
+      ImageId: !Ref EC2ImageId
+      KeyName: !Ref EC2KeyPair
+      SecurityGroupIds:
+           - !Ref SSHSecurityGroupCustomer
+      SubnetId: !Ref VPCCustomerPublicSubnet
+      Tags:
+        - Key: Name
+          Value: CustomerEC2Instance
+  
+Outputs:
+  VPCCustomerCidrBlock:
+    Description: Customer VPC CIDR Block
+    Value: !GetAtt VPCCustomer.CidrBlock
+    Export:
+      Name: VPCCustomerCidrBlock
+  CustomerEC2InstancePublicIp:
+    Description: Customer EC2 Instance Public IP
+    Value: !GetAtt CustomerEC2Instance.PublicIp
+    Export:
+      Name: CustomerEC2InstancePublicIp

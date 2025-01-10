@@ -1,0 +1,130 @@
+Parameters:
+  EC2ImageId:
+    Type: AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>
+    Default: /aws/service/ami-amazon-linux-latest/amzn2-ami-hvm-x86_64-gp2
+  VPCCustomerCidrBlock:
+    Type: String
+    Default: '10.10.0.0/16'
+  CustomerEC2InstancePublicIp:
+    Type: String
+    Default: ''
+  
+
+Resources:
+
+  VPCMain:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: '192.168.0.0/16'
+      EnableDnsSupport: true
+      EnableDnsHostnames: true
+      Tags:
+        - Key: Name
+          Value: MainVPC
+
+  VPCMainPrivateSubnet:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPCMain
+      CidrBlock: '192.168.1.0/24'
+      AvailabilityZone: !Select 
+        - 0
+        - !GetAZs 
+            Ref: 'AWS::Region'
+      Tags:
+        - Key: Name
+          Value: MainPrivateSubnet
+  
+  SSHSecurityGroupMain:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Enable SSH access via port 22
+      VpcId: !Ref VPCMain
+      SecurityGroupIngress:
+        - CidrIp: '0.0.0.0/0'
+          FromPort: 22
+          ToPort: 22
+          IpProtocol: tcp
+        - IpProtocol: icmp
+          FromPort: '-1'
+          ToPort: '-1'
+          CidrIp: '0.0.0.0/0'
+
+  MainEC2Instance:
+    Type: AWS::EC2::Instance
+    Properties:
+      InstanceType: t2.micro
+      ImageId: !Ref EC2ImageId
+      SecurityGroupIds:
+        - !Ref SSHSecurityGroupMain
+      SubnetId: !Ref VPCMainPrivateSubnet
+      Tags:
+        - Key: Name
+          Value: MainEC2Instance
+
+  VPNGateway:
+    Type: AWS::EC2::VPNGateway
+    Properties:
+      Type: ipsec.1
+      Tags:
+        - Key: Name
+          Value: VPNGateway
+  
+  VPNAttachment:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties:
+      VpcId: !Ref VPCMain
+      VpnGatewayId: !Ref VPNGateway
+
+  CustomerGateway:
+    Type: AWS::EC2::CustomerGateway
+    Properties:
+      Type: ipsec.1
+      BgpAsn: 65000
+      IpAddress: !Ref CustomerEC2InstancePublicIp
+      Tags:
+        - Key: Name
+          Value: CustomerGateway
+
+  VPNConnection:
+    Type: AWS::EC2::VPNConnection
+    Properties:
+      CustomerGatewayId: !Ref CustomerGateway
+      VpnGatewayId: !Ref VPNGateway
+      Type: ipsec.1
+      StaticRoutesOnly: true
+      Tags:
+        - Key: Name
+          Value: SiteToSiteVPN
+  
+  VPNConnectionRoute:
+    Type: AWS::EC2::VPNConnectionRoute
+    Properties:
+      DestinationCidrBlock: !Ref  VPCCustomerCidrBlock
+      VpnConnectionId: !Ref VPNConnection
+  
+  MainPrivateRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref VPCMain
+      Tags:
+        - Key: Name
+          Value: MainPrivateRouteTable
+  
+  MainPrivateRoute:
+    Type: AWS::EC2::Route
+    DependsOn:
+      - VPNAttachment
+    Properties:
+      RouteTableId: !Ref MainPrivateRouteTable
+      DestinationCidrBlock: !Ref VPCCustomerCidrBlock
+      GatewayId: !Ref VPNGateway
+  
+  AssociateMainPrivateRouteTableToPrivateSubnet:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref VPCMainPrivateSubnet
+      RouteTableId: !Ref MainPrivateRouteTable
+
+  
+  

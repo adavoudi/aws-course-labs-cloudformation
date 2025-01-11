@@ -1,0 +1,106 @@
+Parameters:
+  EC2ImageId:
+    Type: AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>
+    Default: /aws/service/ami-amazon-linux-latest/amzn2-ami-hvm-x86_64-gp2
+  EC2KeyPair:
+    Type: AWS::EC2::KeyPair::KeyName
+    Default: MyMainKey
+
+Resources:
+
+  ################ VPC1 ################
+  VPC1:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: '10.1.0.0/16'
+      EnableDnsSupport: true
+      EnableDnsHostnames: true
+      Tags:
+        - Key: Name
+          Value: !Sub ${AWS::StackName}-VPC1
+
+  VPC1Subnet:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC1
+      CidrBlock: '10.1.0.0/24'
+      AvailabilityZone: !Select [ 0, !GetAZs '' ]
+      MapPublicIpOnLaunch: true
+
+  VPC1SecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Allow ping from anywhere, allow 22 from anywhere and http from anywhere
+      VpcId: !Ref VPC1
+      SecurityGroupIngress:
+        - CidrIp: '0.0.0.0/0'
+          IpProtocol: icmp
+          FromPort: -1
+          ToPort: -1
+        - CidrIp: '0.0.0.0/0'
+          IpProtocol: tcp
+          FromPort: 22
+          ToPort: 22
+        - CidrIp: '0.0.0.0/0'
+          IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+
+  InternetGateway:
+    Type: AWS::EC2::InternetGateway
+    Properties:
+      Tags:
+        - Key: Name
+          Value: !Sub ${AWS::StackName}-InternetGateway
+  
+  VPC1GatewayAttachment:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties:
+      VpcId: !Ref VPC1
+      InternetGatewayId: !Ref InternetGateway
+  
+  VPC1RouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref VPC1
+      Tags:
+        - Key: Name
+          Value: !Sub ${AWS::StackName}-RouteTable
+
+  IGWRoute:
+    Type: AWS::EC2::Route
+    Properties:
+      RouteTableId: !Ref VPC1RouteTable
+      DestinationCidrBlock: '0.0.0.0/0'
+      GatewayId: !Ref InternetGateway
+
+  VPC1SubnetRouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref VPC1Subnet
+      RouteTableId: !Ref VPC1RouteTable
+
+  VPC1EC2Instance:
+    Type: AWS::EC2::Instance
+    DependsOn:
+         - VPC1SubnetRouteTableAssociation
+    Properties:
+      ImageId: !Ref EC2ImageId
+      InstanceType: t2.micro
+      SecurityGroupIds:
+        - !Ref VPC1SecurityGroup
+      KeyName: !Ref EC2KeyPair
+      SubnetId: !Ref VPC1Subnet
+      UserData: !Base64 |
+        #!/bin/bash
+        yum update -y
+        yum install -y httpd
+        systemctl start httpd
+        systemctl enable httpd
+        echo "<html><h1>Hello World</h1></html>" > /var/www/html/index.html
+      Tags:
+        - Key: Name
+          Value: !Sub ${AWS::StackName}-EC2Instance
+  
+
+  

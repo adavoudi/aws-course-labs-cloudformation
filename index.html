@@ -3,16 +3,36 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>AWS Cognito Hosted UI Example</title>
+  <title>TODO App</title>
+  <!-- TailwindCSS from CDN -->
+  <script src="https://cdn.tailwindcss.com"></script>
 </head>
-<body>
-  <h1>Login with AWS Cognito Hosted UI</h1>
-  <button onclick="login()">Login / Signup</button>
-  <button onclick="logout()">Logout</button>
-  <h2>Tokens:</h2>
-  <pre id="tokens"></pre>
-  <h2>API Response:</h2>
-  <pre id="api-response"></pre>
-  <script type="module" src="app.js"></script>
+<body class="bg-gray-100 text-gray-800 font-sans antialiased">
+
+  <!-- Container -->
+  <div class="min-h-screen flex flex-col justify-center items-center">
+
+    <!-- Header -->
+    <h1 class="text-4xl font-bold text-indigo-600 mb-8 animate__animated animate__fadeIn animate__delay-1s">TODO App</h1>
+
+    <!-- Authentication buttons -->
+    <div class="space-x-4">
+      <button id="login-btn" onclick="login()" class="bg-indigo-600 text-white px-6 py-3 rounded-lg shadow-md hover:bg-indigo-700 transition duration-300 ease-in-out">Login</button>
+      <button id="logout-btn" onclick="logout()" class="bg-red-600 text-white px-6 py-3 rounded-lg shadow-md hover:bg-red-700 transition duration-300 ease-in-out hidden">Logout</button>
+    </div>
+
+    <!-- Todo Section -->
+    <div id="todo-section" class="mt-8 hidden w-full max-w-lg">
+      <div class="flex justify-between items-center mb-4">
+        <input type="text" id="todo-input" placeholder="Add a new task" class="w-4/5 p-3 border border-gray-300 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-indigo-500" />
+        <button id="add-todo-btn" class="ml-4 bg-indigo-600 text-white px-4 py-2 rounded-lg hover:bg-indigo-700 transition duration-200 ease-in-out">Add</button>
+      </div>
+      <ul id="todo-list" class="space-y-3">
+        <!-- Todo list items will go here -->
+      </ul>
+    </div>
+  </div>
+
+  <script src="app.js"></script>
 </body>
 </html>

@@ -1,0 +1,38 @@
+
+Resources:
+  UserPool:
+    Type: AWS::Cognito::UserPool
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Delete
+    Properties:
+      UserPoolName: TODO_APP-user-pool
+      UsernameAttributes:
+        - email
+      AutoVerifiedAttributes:
+        - email
+      Policies:
+        PasswordPolicy:
+          MinimumLength: 6
+          RequireLowercase: true
+          RequireNumbers: true
+      Schema:
+        - Name: email
+          Required: true
+          Mutable: false
+        - Name: name
+          Required: true
+          Mutable: true
+        - Name: family_name
+          Required: true
+          Mutable: true
+        - Name: address
+          Required: false
+          Mutable: true
+      MfaConfiguration: 'OFF'
+      EmailVerificationMessage: "Your verification code is {####}"
+      EmailVerificationSubject: "Your verification code"
+      VerificationMessageTemplate:
+           DefaultEmailOption: CONFIRM_WITH_CODE
+      UserPoolTags:
+        Key: 'Name'
+        Value: TODO_APP-user-pool
